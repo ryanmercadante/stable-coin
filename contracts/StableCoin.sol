@@ -9,11 +9,14 @@ import {WadLib} from "./WadLib.sol";
 contract StableCoin is ERC20 {
     using WadLib for uint256;
 
+    error InitialCollateralRatioError(
+        string message,
+        uint256 minimumDepositAmount
+    );
+
     DepositorCoin public depositorCoin;
     Oracle public oracle;
-
     uint256 public feeRatePercentage;
-
     uint256 public constant INITIAL_COLLATERAL_RATIO_PERCENTAGE = 10;
 
     constructor(uint256 _feeRatePercentage, Oracle _oracle)
@@ -69,10 +72,14 @@ contract StableCoin is ERC20 {
             uint256 requiredInitialSurplusInEth = requiredInitialSurplusInUsd /
                 usdInEthPrice;
 
-            require(
-                msg.value >= deficitInEth + requiredInitialSurplusInEth,
-                "STC: Initial collateral ration not met"
-            );
+            if (msg.value < deficitInEth + requiredInitialSurplusInEth) {
+                uint256 minimumDepositAmount = deficitInEth +
+                    requiredInitialSurplusInEth;
+                revert InitialCollateralRatioError(
+                    "STC: Initial collateral ration not met, minimum is ",
+                    minimumDepositAmount
+                );
+            }
 
             uint256 newInitialSurplusInEth = msg.value - deficitInEth;
             uint256 newInitialSurplusInUsd = newInitialSurplusInEth *
