@@ -1,48 +1,138 @@
-import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
-// eslint-disable-next-line node/no-missing-import
-import { ERC20 } from "../typechain";
+import { DepositorCoin, StableCoin } from "../typechain";
 
-describe("MyERC20Contract", () => {
-  let myERC20Contract: ERC20;
-  // eslint-disable-next-line no-unused-vars
-  let deployer: SignerWithAddress;
-  let someAddress: SignerWithAddress;
-  let someOtherAddress: SignerWithAddress;
+describe("StableCoin:", () => {
+  let ethUsdPrice: number;
+  let feeRatePercentage: number;
+  let StableCoin: StableCoin;
 
   beforeEach(async () => {
-    const ERC20ContractFactory = await ethers.getContractFactory("ERC20");
-    myERC20Contract = await ERC20ContractFactory.deploy("Merc Token", "MERC");
-    await myERC20Contract.deployed();
+    feeRatePercentage = 3;
+    ethUsdPrice = 4000;
 
-    [deployer, someAddress, someOtherAddress] = await ethers.getSigners();
+    const OracleFactory = await ethers.getContractFactory("Oracle");
+    const ethUsdOracle = await OracleFactory.deploy();
+    await ethUsdOracle.setPrice(ethUsdPrice);
+
+    const StableCoinFactory = await ethers.getContractFactory("StableCoin");
+    StableCoin = await StableCoinFactory.deploy(
+      feeRatePercentage,
+      ethUsdOracle.address
+    );
+    await StableCoin.deployed();
   });
 
-  describe("When I have 10 tokens", () => {
-    beforeEach(async () => {
-      await myERC20Contract.transfer(someAddress.address, 10);
+  it("Should set fee rate percentage", async () => {
+    expect(await StableCoin.feeRatePercentage()).to.equal(feeRatePercentage);
+  });
+
+  it("Should allow minting", async () => {
+    const ethAmount = 1;
+    const expectedMintAmount = ethAmount * ethUsdPrice;
+
+    await StableCoin.mint({
+      value: ethers.utils.parseEther(ethAmount.toString()),
     });
 
-    describe("When I transfer 10 tokens", () => {
-      it("should transfer tokens correctly", async () => {
-        await myERC20Contract
-          .connect(someAddress)
-          .transfer(someOtherAddress.address, 10);
+    expect(await StableCoin.totalSupply()).to.equal(
+      ethers.utils.parseEther(expectedMintAmount.toString())
+    );
+  });
 
-        expect(
-          await myERC20Contract.balanceOf(someOtherAddress.address)
-        ).to.equal(10);
+  describe("Minted tokens:", () => {
+    let mintAmount: number;
+
+    beforeEach(async () => {
+      const ethAmount = 1;
+      mintAmount = ethAmount * ethUsdPrice;
+
+      await StableCoin.mint({
+        value: ethers.utils.parseEther(ethAmount.toString()),
       });
     });
 
-    describe("When I transfer 15 tokens", () => {
-      it("should revert the transaction", async () => {
-        await expect(
-          myERC20Contract
-            .connect(someAddress)
-            .transfer(someOtherAddress.address, 15)
-        ).to.be.revertedWith("ERC20: transfer amount exceeds balance");
+    it("Should allow burning", async () => {
+      const remainingStableCoinAmount = 100;
+      await StableCoin.burn(
+        ethers.utils.parseEther(
+          (mintAmount - remainingStableCoinAmount).toString()
+        )
+      );
+
+      expect(await StableCoin.totalSupply()).to.equal(
+        ethers.utils.parseEther(remainingStableCoinAmount.toString())
+      );
+    });
+
+    it("Should prevent depositing collateral buffer below minimum", async () => {
+      const expectedMinimumAmount = 0.1; // 10% of 1 ETH
+      const stableCoinCollateralBuffer = 0.05; // less than minimum
+
+      await expect(
+        StableCoin.depositCollateralBuffer({
+          value: ethers.utils.parseEther(stableCoinCollateralBuffer.toString()),
+        })
+      ).to.be.revertedWith(
+        `custom error 'InitialCollateralRatioError("STC: Initial collateral ratio not met, minimum is ", ${ethers.utils.parseEther(
+          expectedMinimumAmount.toString()
+        )})'`
+      );
+    });
+
+    it("Should allow depositing collateral buffer", async () => {
+      const stableCoinCollateralBuffer = 0.5;
+      await StableCoin.depositCollateralBuffer({
+        value: ethers.utils.parseEther(stableCoinCollateralBuffer.toString()),
+      });
+
+      const DepositorCoinFactory = await ethers.getContractFactory(
+        "DepositorCoin"
+      );
+      const DepositorCoin = await DepositorCoinFactory.attach(
+        await StableCoin.depositorCoin()
+      );
+
+      const newInitialSurplusInUsd = stableCoinCollateralBuffer * ethUsdPrice;
+      expect(await DepositorCoin.totalSupply()).to.equal(
+        ethers.utils.parseEther(newInitialSurplusInUsd.toString())
+      );
+    });
+
+    describe("Deposited collateral buffer:", () => {
+      let stableCoinCollateralBuffer: number;
+      let DepositorCoin: DepositorCoin;
+
+      beforeEach(async () => {
+        stableCoinCollateralBuffer = 0.5;
+        await StableCoin.depositCollateralBuffer({
+          value: ethers.utils.parseEther(stableCoinCollateralBuffer.toString()),
+        });
+
+        const DepositorCoinFactory = await ethers.getContractFactory(
+          "DepositorCoin"
+        );
+        DepositorCoin = await DepositorCoinFactory.attach(
+          await StableCoin.depositorCoin()
+        );
+      });
+
+      it("Should allow withdrawing collateral buffer", async () => {
+        const newDepositorTotalSupply =
+          stableCoinCollateralBuffer + ethUsdPrice;
+        const stableCoinCollateralBurnAmount = newDepositorTotalSupply * 0.2;
+
+        await StableCoin.withdrawCollateralBuffer(
+          ethers.utils.parseEther(stableCoinCollateralBurnAmount.toString())
+        );
+
+        expect(await DepositorCoin.totalSupply()).to.equal(
+          ethers.utils.parseEther(
+            (
+              newDepositorTotalSupply - stableCoinCollateralBurnAmount
+            ).toString()
+          )
+        );
       });
     });
   });

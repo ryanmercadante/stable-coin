@@ -29,6 +29,7 @@ contract StableCoin is ERC20 {
     function mint() external payable {
         uint256 fee = _getFee(msg.value);
         uint256 remainingEth = msg.value - fee;
+
         uint256 mintStableCoinAmount = remainingEth * oracle.getPrice();
         _mint(msg.sender, mintStableCoinAmount);
     }
@@ -56,6 +57,7 @@ contract StableCoin is ERC20 {
         if (!hasDepositors) {
             return 0;
         }
+
         return (feeRatePercentage * ethAmount) / 100;
     }
 
@@ -76,7 +78,7 @@ contract StableCoin is ERC20 {
                 uint256 minimumDepositAmount = deficitInEth +
                     requiredInitialSurplusInEth;
                 revert InitialCollateralRatioError(
-                    "STC: Initial collateral ration not met, minimum is ",
+                    "STC: Initial collateral ratio not met, minimum is ",
                     minimumDepositAmount
                 );
             }
@@ -86,7 +88,9 @@ contract StableCoin is ERC20 {
                 usdInEthPrice;
 
             depositorCoin = new DepositorCoin();
-            depositorCoin.mint(msg.sender, newInitialSurplusInUsd);
+            uint256 mintDepostorCoinAmount = newInitialSurplusInUsd;
+            depositorCoin.mint(msg.sender, mintDepostorCoinAmount);
+
             return;
         }
 
@@ -103,7 +107,7 @@ contract StableCoin is ERC20 {
     {
         require(
             depositorCoin.balanceOf(msg.sender) >= burnDepositorCoinAmount,
-            "STC: Sender has insufficient DPC funds"
+            "STC: Sender has insuffient DPC funds"
         );
 
         depositorCoin.burn(msg.sender, burnDepositorCoinAmount);

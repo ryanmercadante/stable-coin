@@ -6,19 +6,11 @@ library WadLib {
 
     type Wad is uint256;
 
-    function mulWad(uint256 number, Wad wad)
-        internal
-        pure
-        returns (uint256)
-    {
+    function mulWad(uint256 number, Wad wad) internal pure returns (uint256) {
         return (number * Wad.unwrap(wad)) / MULTIPLIER;
     }
 
-    function divWad(uint256 number, Wad wad)
-        internal
-        pure
-        returns (uint256)
-    {
+    function divWad(uint256 number, Wad wad) internal pure returns (uint256) {
         return (number * MULTIPLIER) / Wad.unwrap(wad);
     }
 
